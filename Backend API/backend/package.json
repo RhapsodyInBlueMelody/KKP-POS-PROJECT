@@ -1,0 +1,30 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@elysiajs/jwt": "^1.4.2",
+    "@prisma/client": "^7.8.0",
+    "bcrypt": "^6.0.0",
+    "elysia": "^1.4.28",
+    "express": "^5.2.1",
+    "prisma": "^7.8.0"
+  },
+  "devDependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@types/bcryptjs": "^3.0.0",
+    "@types/node": "^25.9.0",
+    "@types/pg": "^8.20.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.21.0",
+    "tsx": "^4.22.2",
+    "typescript": "^6.0.3"
+  }
+}
