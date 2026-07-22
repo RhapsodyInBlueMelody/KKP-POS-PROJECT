@@ -92,8 +92,8 @@ All protected endpoints require `Authorization: Bearer <token>` and enforce RBAC
 
 ```bash
 # Clone and install
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-cd YOUR_REPO_NAME/backend
+git clone https://github.com/RhapsodyInBlueMelody/KKP-POS-PROJECT.git
+cd KKP-POS-PROJECT/backend
 
 # Copy environment variables
 cp .env.example .env
@@ -111,7 +111,7 @@ bun run dev
 ### Mobile
 
 ```bash
-cd ../mobile
+cd ../Android
 
 npm install
 
