@@ -1,116 +1,169 @@
-import { Elysia } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
 
+const transactionItemSchema = t.Object({
+    productId: t.String({ minLength: 1 }),
+    quantity: t.Integer({ minimum: 1 }),
+});
+
+const paymentMethodSchema = t.Union([
+    t.Literal('QRIS'),
+    t.Literal('CASH'),
+    t.Literal('TRANSFER'),
+]);
+
 export const transactionRoutes = new Elysia()
     .use(authMiddleware)
-    .post('/transaction', async ({ body, user, set }: any) => {
+    .post('/transaction', async ({ body, user, set }) => {
         try {
-            // Gerbang keamanan utama untuk mencegah error runtime objek null
             if (!user) {
                 set.status = 401;
-                return { message: "Transaksi Gagal!", detail: "Sesi kasir tidak valid." };
+                return { message: 'Transaksi Gagal!', detail: 'Sesi kasir tidak valid.' };
             }
 
-            const { items, paymentMethod } = body as {
-                items: { productId: string; quantity: number; priceAtTime: number }[];
-                paymentMethod: string;
-            };
+            const { items, paymentMethod } = body;
 
-            const totalPrice = items.reduce((sum, item) => sum + (item.priceAtTime * item.quantity), 0);
+            // A product may only appear once in a checkout request. This keeps
+            // stock validation and transaction-item creation unambiguous.
+            const productIds = new Set(items.map(item => item.productId));
+            if (productIds.size !== items.length) {
+                set.status = 400;
+                return {
+                    message: 'Transaksi Gagal!',
+                    detail: 'Produk yang sama tidak boleh muncul lebih dari sekali dalam satu transaksi.'
+                };
+            }
+
             const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-            const transactionCode = `TRX${date}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+            const transactionCode = `TRX${date}${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 
-            // Eksekusi ACID Transaction secara rapi dan aman
             const result = await prisma.$transaction(async (tx) => {
-                const transaction = await tx.transaction.create({
-                    data: {
-                        code: transactionCode,
-                        totalPrice: totalPrice,
-                        kasirId: user.userId, // Langsung pakai userId secara mutlak
-                        paymentMethod: paymentMethod,
-                    }
-                });
-
-                await tx.transactionItem.createMany({
-                    data: items.map((item, index) => ({
-                        code: `TRXITEM${date}${index.toString().padStart(3, '0')}${Math.floor(1000 + Math.random() * 9000)}`,
-                        quantity: item.quantity,
-                        priceAtTime: item.priceAtTime,
-                        transactionId: transaction.transactionId,
-                        productId: item.productId,
-                    }))
-                });
-
-                for (const item of items) {
-                    // 1. Ambil data produk real-time di dalam transaksi
-                    const currentProduct = await tx.product.findUnique({
+                const products = await Promise.all(
+                    items.map(item => tx.product.findUnique({
                         where: { productId: item.productId },
-                        select: { name: true, stock: true }
-                    });
+                        select: {
+                            productId: true,
+                            name: true,
+                            price: true,
+                            stock: true,
+                        }
+                    }))
+                );
 
-                    // 2. Jika produk tidak ketemu atau stoknya kurang, batalkan seluruh transaksi secara otomatis!
-                    if (!currentProduct) {
+                for (let index = 0; index < products.length; index++) {
+                    const product = products[index];
+                    const item = items[index];
+
+                    if (!product) {
                         throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
                     }
 
-                    if (currentProduct.stock < item.quantity) {
-                        throw new Error(`Stok untuk "${currentProduct.name}" tidak mencukupi! (Sisa: ${currentProduct.stock}, Diminta: ${item.quantity})`);
+                    if (product.stock < item.quantity) {
+                        throw new Error(`Stok untuk "${product.name}" tidak mencukupi! (Sisa: ${product.stock}, Diminta: ${item.quantity})`);
+                    }
+                }
+
+                const totalPrice = products.reduce((sum, product, index) => {
+                    if (!product) return sum;
+                    return sum + Number(product.price) * items[index].quantity;
+                }, 0);
+
+                const transaction = await tx.transaction.create({
+                    data: {
+                        code: transactionCode,
+                        totalPrice,
+                        kasirId: user.userId,
+                        paymentMethod,
+                    }
+                });
+
+                for (let index = 0; index < products.length; index++) {
+                    const product = products[index];
+                    const item = items[index];
+
+                    if (!product) {
+                        throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
                     }
 
-                    // 3. Jika aman, baru lakukan decrement
-                    await tx.product.update({
-                        where: { productId: item.productId },
-                        data: { stock: { decrement: item.quantity } }
+                    // The price is copied from the database, never from the client.
+                    await tx.transactionItem.create({
+                        data: {
+                            code: `TRXITEM${crypto.randomUUID().replace(/-/g, '').toUpperCase()}`,
+                            quantity: item.quantity,
+                            priceAtTime: Number(product.price),
+                            transactionId: transaction.transactionId,
+                            productId: product.productId,
+                        }
                     });
+
+                    // The stock condition makes the decrement atomic. If another
+                    // checkout consumes the remaining stock first, this update
+                    // affects zero rows and the whole database transaction rolls back.
+                    const stockUpdate = await tx.product.updateMany({
+                        where: {
+                            productId: product.productId,
+                            stock: { gte: item.quantity },
+                        },
+                        data: {
+                            stock: { decrement: item.quantity },
+                        }
+                    });
+
+                    if (stockUpdate.count !== 1) {
+                        throw new Error(`Stok untuk "${product.name}" berubah dan tidak lagi mencukupi. Silakan coba lagi.`);
+                    }
                 }
 
                 return transaction;
             });
 
-            return { message: "Transaksi Berhasil", transactionCode: result.code };
+            return { message: 'Transaksi Berhasil', transactionCode: result.code };
 
         } catch (e: any) {
             set.status = 500;
             return {
-                message: "Transaksi Gagal!",
-                detail: e.message || "Terjadi kesalahan internal pada database."
+                message: 'Transaksi Gagal!',
+                detail: e.message || 'Terjadi kesalahan internal pada database.'
             };
         }
+    }, {
+        body: t.Object({
+            items: t.Array(transactionItemSchema, { minItems: 1 }),
+            paymentMethod: paymentMethodSchema,
+        })
     })
-    .get('/transactions', async ({ user, set }: any) => {
+    .get('/transactions', async ({ user, set }) => {
         try {
             if (!user) {
                 set.status = 401;
-                return { message: "Gagal memuat histori!", detail: "Sesi kasir tidak valid." };
+                return { message: 'Gagal memuat histori!', detail: 'Sesi kasir tidak valid.' };
             }
 
-            // Ambil data dari database Prisma sesuai nama relasi di skema lu
             const history = await prisma.transaction.findMany({
                 where: {
                     kasirId: user.userId
                 },
                 include: {
-                    items: { // SINKRON: Menggunakan 'items' sesuai isi model Transaction lu
+                    items: {
                         include: {
                             product: {
                                 select: {
                                     name: true,
-                                    code: true // Kita ambil code produk juga sekalian buat jaga-jaga di UI
+                                    code: true
                                 }
                             }
                         }
                     }
                 },
                 orderBy: {
-                    createdAt: 'desc' // Urutkan dari transaksi paling baru
+                    createdAt: 'desc'
                 }
             });
 
-            // Karena totalPrice bertipe Decimal, kita konversi datanya agar aman dibaca React Native
             const formattedHistory = history.map(trx => ({
                 ...trx,
-                totalPrice: Number(trx.totalPrice), // Ubah Decimal Prisma jadi Number biasa
+                totalPrice: Number(trx.totalPrice),
                 items: trx.items.map(item => ({
                     ...item,
                     priceAtTime: Number(item.priceAtTime)
@@ -118,15 +171,15 @@ export const transactionRoutes = new Elysia()
             }));
 
             return {
-                message: "Histori transaksi berhasil dimuat",
+                message: 'Histori transaksi berhasil dimuat',
                 data: formattedHistory
             };
 
         } catch (e: any) {
             set.status = 500;
             return {
-                message: "Gagal memuat histori!",
-                detail: e.message || "Terjadi kesalahan internal pada database."
+                message: 'Gagal memuat histori!',
+                detail: e.message || 'Terjadi kesalahan internal pada database.'
             };
         }
     });

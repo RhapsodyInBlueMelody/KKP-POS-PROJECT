@@ -11,22 +11,31 @@ export const authMiddleware = new Elysia()
     .derive({ as: 'global' }, async ({ jwt, headers, set }) => {
         const authHeader = headers.authorization
 
-        if (!authHeader) {
+        if (!authHeader?.startsWith('Bearer ')) {
             set.status = 401
             throw new Error('Unauthorized')
         }
 
-        const token = authHeader.replace('Bearer ', '')
+        const token = authHeader.slice('Bearer '.length).trim()
+
+        if (!token) {
+            set.status = 401
+            throw new Error('Unauthorized')
+        }
 
         try {
             const payload = await jwt.verify(token)
-            console.log("payload:", payload)
+
+            if (!payload || typeof payload.userId !== 'string' || typeof payload.role !== 'string') {
+                set.status = 401
+                throw new Error('Unauthorized')
+            }
 
             return {
-                user: payload as {
-                    userId: string
-                    role: string
-                    exp: number
+                user: {
+                    userId: payload.userId,
+                    role: payload.role,
+                    exp: typeof payload.exp === 'number' ? payload.exp : 0
                 }
             }
         } catch {
