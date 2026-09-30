@@ -1,8 +1,8 @@
 import 'dotenv/config'
 import bcrypt from 'bcryptjs'
 import { Pool } from 'pg'
+import { Prisma, PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { PrismaClient } from '@prisma/client'
 
 const connectionString = process.env.DATABASE_URL!
 const pool = new Pool({ connectionString })
@@ -126,7 +126,7 @@ async function main() {
         '20260524' // Hari ini
     ]
 
-    const paymentMethods = ['CASH', 'QRIS']
+    const paymentMethods: Prisma.PaymentMethod[] = ['CASH', 'QRIS']
 
     let totalTrxCreated = 0
 
@@ -158,7 +158,10 @@ async function main() {
                 }
             })
 
-            const totalPrice = trxItemsPayload.reduce((sum, item) => sum + (item.priceAtTime * item.quantity), 0)
+            const totalPrice = trxItemsPayload.reduce(
+                (sum, item) => sum.add(item.priceAtTime.mul(item.quantity)),
+                new Prisma.Decimal(0)
+            )
             const chosenMethod = paymentMethods[Math.floor(Math.random() * paymentMethods.length)]
 
             // Gunakan aman upsert / create langsung dengan pengecekan kode
