@@ -1,140 +1,184 @@
-# 🛒 KOSAI POS — Point of Sale System for Android
+# KOSAI POS — Android Point of Sale System
 
-A full-stack Android Point of Sale application built for **KOSAI TB 1** (Koperasi Otomotif Sejahtera Indonesia), a cooperative unit in Tambun, Bekasi. Developed as part of an internship (Kerja Praktek) project at Universitas Pelita Bangsa.
+A full-stack Point of Sale (POS) system built for **KOSAI TB 1**, a cooperative unit in Tambun, Bekasi. The project was developed as part of a Kerja Praktek (KP) project at Universitas Pelita Bangsa.
 
-> Built to replace manual transaction recording with a structured, role-based digital system covering product management, consignment supplier tracking, transaction processing, and sales analytics.
-
----
+The system is designed to replace manual transaction recording with a structured workflow for product management, cashier authentication, checkout, inventory updates, and transaction history.
 
 ## Tech Stack
 
-**Mobile (Frontend)**
-- React Native + Expo
+### Mobile
 
-**Backend**
-- Bun runtime + ElysiaJS
-- Prisma ORM + PostgreSQL
-- Docker (containerized deployment)
+- React Native
+- Expo
+- TypeScript
+- React Navigation
+- React Native Paper
+- TanStack Query
 
-**Auth & Security**
-- JWT (JSON Web Token)
+### Backend
+
+- Bun
+- ElysiaJS
+- TypeScript
+- Prisma ORM 7
+- PostgreSQL
+- Docker / Docker Compose
+- JWT authentication
 - bcrypt password hashing
-- RBAC — Role-Based Access Control (Admin / Kasir)
 
----
+## Current Features
 
-## Features
+- JWT-based authentication
+- Admin and Kasir roles
+- Protected API endpoints using Bearer authentication
+- Product listing and category filtering
+- Admin-only product creation, editing, and deletion
+- Product audit fields tied to the authenticated user
+- Checkout with Cash, QRIS, and Transfer payment-method values
+- Server-authoritative product pricing
+- Historical transaction-item pricing
+- Atomic inventory decrement inside a database transaction
+- Transaction history for the authenticated cashier
+- PostgreSQL-backed persistence
 
-### ✅ Implemented
-| Feature | Description |
-|---|---|
-| Authentication | Login with JWT, role-based routing (Admin / Kasir) |
-| Product Management | Add, edit, delete products with category assignment |
-| Category Management | Organize products into categories |
-| Supplier Management | Track consignment suppliers (mitra konsinyasi) |
-| Transaction Processing | Checkout with Cash payment, atomic via Prisma `$transaction` |
-| Transaction History | View transaction records per session |
-| Digital Receipt | Receipt generated per transaction (digital) |
-| Sales Statistics | Revenue overview, sales trends, best-selling products |
-| Supplier Report | Consignment revenue sharing report per supplier |
-| RBAC Enforcement | Kasir role restricted from Admin-only menus |
+## Security and Reliability Work
 
-### 🚧 In Development
-| Feature | Status |
-|---|---|
-| QRIS & Bank Transfer payment | Schema ready (ENUM), UI not yet implemented |
-| Thermal printer integration | Digital receipt works; physical print pending |
-| Kasir account management | Blocked by DB connectivity issue |
-| PPOB / Digital products | Blocked by external provider integration |
+The repository has undergone a security-focused cleanup before being prepared as a portfolio project.
 
----
+Notable backend protections include:
+
+- Client applications cannot choose the price used for a transaction. The backend reads the current product price from PostgreSQL and records that value as the transaction-item price snapshot.
+- Checkout requests are validated at the API boundary.
+- Duplicate products are rejected within a single checkout request.
+- Stock decrements use a conditional database update so concurrent checkouts cannot decrement stock below the requested quantity.
+- Product administration is restricted to the `ADMIN` role.
+- Product audit fields use the authenticated user's ID rather than a client-supplied user ID.
+- Authentication failures use a generic response so the API does not reveal whether a username exists.
+- Secrets and local development credentials were removed from repository history and protected by repository ignore rules.
 
 ## Architecture
 
-The system uses a **multi-tenant data model** with `Store` as the root entity, isolating all operational data (products, categories, transactions, suppliers) per store instance. New store registration is handled manually by the platform owner — there is no self-registration flow by design.
-
+```text
+React Native / Expo
+        │
+        │ HTTP + Bearer JWT
+        ▼
+┌──────────────────────┐
+│      Elysia API      │
+│       (Bun)          │
+├──────────────────────┤
+│ Authentication       │
+│ Authorization / RBAC │
+│ Request validation   │
+│ Transaction logic    │
+└──────────┬───────────┘
+           │ Prisma
+           ▼
+┌──────────────────────┐
+│     PostgreSQL       │
+├──────────────────────┤
+│ Users                │
+│ Products             │
+│ Categories           │
+│ Transactions         │
+│ Transaction Items    │
+│ Suppliers            │
+└──────────────────────┘
 ```
-Store
-├── Users (Admin / Kasir)
-├── Products → Categories
-├── Suppliers (Consignment)
-└── Transactions → Transaction Items
-                └── Receipts
+
+The repository also contains project diagrams under `Diagram Projeck POS/`.
+
+## API Endpoints
+
+| Method | Endpoint | Purpose | Access |
+|---|---|---|---|
+| `POST` | `/login` | Authenticate a user and issue a JWT | Public |
+| `GET` | `/profile` | Get the authenticated user's profile | Authenticated |
+| `GET` | `/products` | List products, optionally filtered by category code | Authenticated |
+| `POST` | `/products` | Create a product | Admin |
+| `PATCH` | `/product/:id` | Update a product | Admin |
+| `DELETE` | `/product/:id` | Delete a product | Admin |
+| `POST` | `/transaction` | Process a checkout | Authenticated |
+| `GET` | `/transactions` | Retrieve the authenticated cashier's transaction history | Authenticated |
+
+## Project Structure
+
+```text
+KKP-POS-PROJECT/
+├── Android/                 # React Native / Expo application
+├── Backend API/
+│   ├── .env.example         # Safe environment-variable template
+│   ├── docker-compose.yml   # PostgreSQL development service
+│   └── backend/
+│       ├── prisma/          # Prisma schema and seed data
+│       └── src/             # Elysia API source
+└── Diagram Projeck POS/     # System and database diagrams
 ```
 
----
-
-## API Overview
-
-Built with **ElysiaJS on Bun**, the REST API covers:
-
-- `POST /auth/login` — authenticate and receive JWT
-- `GET/POST/PUT/DELETE /products` — product CRUD
-- `GET/POST/PUT/DELETE /categories` — category CRUD
-- `GET/POST/PUT/DELETE /suppliers` — supplier CRUD
-- `POST /transactions` — process checkout (atomic)
-- `GET /transactions` — transaction history
-- `GET /statistics` — sales analytics
-- `GET /supplier-reports` — consignment revenue reports
-
-All protected endpoints require `Authorization: Bearer <token>` and enforce RBAC at the middleware level.
-
----
-
-## Running Locally
+## Local Development
 
 ### Prerequisites
-- [Bun](https://bun.sh/) >= 1.0
-- Docker & Docker Compose
-- Node.js (for Expo)
+
+- Bun
+- Docker or Podman with Compose support
+- PostgreSQL (provided through the Compose setup)
+- Expo-compatible React Native development environment
 
 ### Backend
 
 ```bash
-# Clone and install
-git clone https://github.com/RhapsodyInBlueMelody/KKP-POS-PROJECT.git
-cd KKP-POS-PROJECT/backend
+cd "Backend API"
 
-# Copy environment variables
+# Create your local environment file from the safe template.
 cp .env.example .env
 
-# Start database
-docker-compose up -d
+# Start PostgreSQL.
+docker compose up -d
 
-# Run migrations
+# Install backend dependencies.
+cd backend
+bun install
+
+# Generate the Prisma client and apply the project's database setup.
+bunx prisma generate
 bunx prisma migrate dev
 
-# Start server
+# Start the API in development mode.
 bun run dev
 ```
+
+> **Note:** Prisma's precompiled engines currently have compatibility limitations on NixOS. If you use NixOS, Prisma CLI generation may require a supported engine/runtime setup. This is an environment limitation rather than an application feature requirement.
 
 ### Mobile
 
 ```bash
-cd ../Android
-
-npm install
-
-npx expo start
+cd Android
+bun install
+bun start
 ```
 
----
+Configure the API base URL for the mobile environment as required by your local network/device setup.
+
+## Verification Status
+
+The repository-side security and API hardening work has been completed. Local end-to-end verification still depends on the development environment, database availability, and Prisma engine compatibility.
+
+Known follow-up work includes:
+
+- migrating `TransactionItem.priceAtTime` from floating-point storage to the same decimal representation used for other monetary fields;
+- completing automated backend tests for authentication, authorization, checkout, and concurrent stock updates;
+- validating the complete Android-to-API transaction flow on a physical device or emulator.
+
+These items are documented deliberately rather than presented as completed functionality.
 
 ## Project Context
 
-This project was developed as a **Kerja Praktek (KP)** assignment at:
-
-- **University:** Universitas Pelita Bangsa (UPB), Cikarang
-- **Program:** Teknik Informatika, Semester 7
-- **Internship Site:** KOSAI TB 1, Tambun, Bekasi
-- **Supervisor:** Pak Sanudin
-
-The system was designed around the real operational constraints of the cooperative: a single admin managing both inventory and consignment suppliers, with kasir (cashier) staff handling day-to-day transactions.
-
----
+**Institution:** Universitas Pelita Bangsa  
+**Program:** Teknik Informatika  
+**Project:** Kerja Praktek (KP)  
+**Location:** Cikarang / Bekasi, West Java, Indonesia
 
 ## Author
 
-**Syeddinul Faiz Caniggia**
+**Syeddinul Faiz Caniggia**  
 Teknik Informatika — Universitas Pelita Bangsa
-[GitHub](https://github.com/RhapsodyInBlueMelody) · [Portfolio](https://faizcan.vercel.app)
