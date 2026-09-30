@@ -1,110 +1,92 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { prisma } from '../lib/prisma'
 import { authMiddleware } from '../middleware/auth'
 
-function adminRoleChecker(user: any): boolean {
+function adminRoleChecker(user: { role: string }): boolean {
     return user.role === 'ADMIN'
 }
 
-type ProductBody = {
-    code: string
-    name: string
-    price: number
-    stock: number
-    unit: string
-    categoryId: string
-}
+const productBodySchema = t.Object({
+    code: t.String({ minLength: 1 }),
+    name: t.String({ minLength: 1 }),
+    price: t.Number({ minimum: 0 }),
+    stock: t.Integer({ minimum: 0 }),
+    unit: t.String({ minLength: 1 }),
+    categoryId: t.String({ minLength: 1 }),
+})
 
 export const getProductRoutes = new Elysia()
     .use(authMiddleware)
-    .get('/products', async ({ user, error, query }: any) => {
+    .get('/products', async ({ query }) => {
+        const { code } = query as { code?: string }
 
-
-        const { code } = query as {
-            code?: string
-        }
-
-        let products
-
-        if (code) {
-
-            products = await prisma.product.findMany({
-                where: {
-                    category: {
-                        code: code
-                    }
-                },
-            })
-
-        } else {
-
-            products = await prisma.product.findMany()
-
-        }
+        const products = await prisma.product.findMany({
+            where: code ? { category: { code } } : undefined,
+        })
 
         return { products }
-
     })
-    .patch('/product/:id', async ({ user, error, params, body }: any) => {
-
-        let isAdmin: boolean = adminRoleChecker(user)
-        if (!isAdmin) {
+    .patch('/product/:id', async ({ user, error, params, body }) => {
+        if (!adminRoleChecker(user)) {
             return error(403, 'Forbidden')
         }
 
-        const product = await prisma.product.update({
-            where: {
-                productId: params.id
-            },
-            data: {
-                price: body.price,
-                name: body.name,
-                code: body.code,
-                stock: body.stock,
-                unit: body.unit,
-                categoryId: body.categoryId,
-                updatedBy: body.userId
+        try {
+            const product = await prisma.product.update({
+                where: { productId: params.id },
+                data: {
+                    price: body.price,
+                    name: body.name,
+                    code: body.code,
+                    stock: body.stock,
+                    unit: body.unit,
+                    categoryId: body.categoryId,
+                    // Audit fields must come from the authenticated user,
+                    // never from the request body.
+                    updatedBy: user.userId,
+                }
+            })
+
+            return { product }
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                return error(404, 'Product not found')
             }
-        })
-
-        return { product }
-    })
-    .delete('/product/:id', async ({ user, error, params }: any) => {
-
-        let isAdmin: boolean = adminRoleChecker(user)
-        if (!isAdmin) {
-            return error(403, 'Forbidden')
-        }
-
-        await prisma.product.delete({
-            where: {
-                productId: params.id
+            if (e.code === 'P2002') {
+                return error(409, 'Product code already exists')
             }
-        })
-
-        return { message: 'Deleted Successfully' }
+            return error(500, 'Something went wrong')
+        }
+    }, {
+        body: productBodySchema
     })
-    .post('/products', async ({ user, error, body }: any) => {
-
-
-        const { code, name, price, stock, unit, categoryId } = body as ProductBody
-
-        let isAdmin = adminRoleChecker(user)
-
-        if (!isAdmin) {
+    .delete('/product/:id', async ({ user, error, params }) => {
+        if (!adminRoleChecker(user)) {
             return error(403, 'Forbidden')
         }
 
+        try {
+            await prisma.product.delete({
+                where: { productId: params.id }
+            })
+
+            return { message: 'Deleted Successfully' }
+        } catch (e: any) {
+            if (e.code === 'P2025') {
+                return error(404, 'Product not found')
+            }
+            return error(500, 'Something went wrong')
+        }
+    })
+    .post('/products', async ({ user, error, body }) => {
+        if (!adminRoleChecker(user)) {
+            return error(403, 'Forbidden')
+        }
 
         try {
             const product = await prisma.product.create({
                 data: {
-                    code,
-                    name,
-                    price,
-                    stock,
-                    unit,
-                    categoryId,
+                    ...body,
                     createdBy: user.userId,
                     updatedBy: user.userId,
                 }
@@ -117,5 +99,6 @@ export const getProductRoutes = new Elysia()
             }
             return error(500, 'Something went wrong')
         }
-
+    }, {
+        body: productBodySchema
     })
