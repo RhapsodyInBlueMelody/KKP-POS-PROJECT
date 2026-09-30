@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth'
 
 export const profileRoutes = new Elysia()
     .use(authMiddleware)
-    .get('/profile', async ({ user, error }) => {
+    .get('/profile', async ({ user, set }) => {
         const profile = await prisma.user.findUnique({
             where: {
                 userId: user.userId
@@ -20,7 +20,8 @@ export const profileRoutes = new Elysia()
         })
 
         if (!profile) {
-            return error(404, 'Profile not found')
+            set.status = 404
+            return { message: 'Profile not found' }
         }
 
         return { profile }
