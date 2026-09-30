@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
 
@@ -24,8 +25,6 @@ export const transactionRoutes = new Elysia()
 
             const { items, paymentMethod } = body;
 
-            // A product may only appear once in a checkout request. This keeps
-            // stock validation and transaction-item creation unambiguous.
             const productIds = new Set(items.map(item => item.productId));
             if (productIds.size !== items.length) {
                 set.status = 400;
@@ -64,10 +63,12 @@ export const transactionRoutes = new Elysia()
                     }
                 }
 
-                const totalPrice = products.reduce((sum, product, index) => {
-                    if (!product) return sum;
-                    return sum + Number(product.price) * items[index].quantity;
-                }, 0);
+                const totalPrice = products.reduce(
+                    (sum, product, index) => product
+                        ? sum.plus(product.price.mul(items[index].quantity))
+                        : sum,
+                    new Prisma.Decimal(0)
+                );
 
                 const transaction = await tx.transaction.create({
                     data: {
@@ -86,20 +87,16 @@ export const transactionRoutes = new Elysia()
                         throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
                     }
 
-                    // The price is copied from the database, never from the client.
                     await tx.transactionItem.create({
                         data: {
                             code: `TRXITEM${crypto.randomUUID().replace(/-/g, '').toUpperCase()}`,
                             quantity: item.quantity,
-                            priceAtTime: Number(product.price),
+                            priceAtTime: product.price,
                             transactionId: transaction.transactionId,
                             productId: product.productId,
                         }
                     });
 
-                    // The stock condition makes the decrement atomic. If another
-                    // checkout consumes the remaining stock first, this update
-                    // affects zero rows and the whole database transaction rolls back.
                     const stockUpdate = await tx.product.updateMany({
                         where: {
                             productId: product.productId,
