@@ -14,6 +14,8 @@ const paymentMethodSchema = t.Union([
     t.Literal('TRANSFER'),
 ]);
 
+class TransactionInputError extends Error {}
+
 export const transactionRoutes = new Elysia()
     .use(authMiddleware)
     .post('/transaction', async ({ body, user, set }) => {
@@ -55,11 +57,11 @@ export const transactionRoutes = new Elysia()
                     const item = items[index];
 
                     if (!product) {
-                        throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
+                        throw new TransactionInputError(`Produk dengan ID ${item.productId} tidak ditemukan.`);
                     }
 
                     if (product.stock < item.quantity) {
-                        throw new Error(`Stok untuk "${product.name}" tidak mencukupi! (Sisa: ${product.stock}, Diminta: ${item.quantity})`);
+                        throw new TransactionInputError(`Stok untuk "${product.name}" tidak mencukupi! (Sisa: ${product.stock}, Diminta: ${item.quantity})`);
                     }
                 }
 
@@ -84,7 +86,7 @@ export const transactionRoutes = new Elysia()
                     const item = items[index];
 
                     if (!product) {
-                        throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan.`);
+                        throw new TransactionInputError(`Produk dengan ID ${item.productId} tidak ditemukan.`);
                     }
 
                     await tx.transactionItem.create({
@@ -108,7 +110,7 @@ export const transactionRoutes = new Elysia()
                     });
 
                     if (stockUpdate.count !== 1) {
-                        throw new Error(`Stok untuk "${product.name}" berubah dan tidak lagi mencukupi. Silakan coba lagi.`);
+                        throw new TransactionInputError(`Stok untuk "${product.name}" berubah dan tidak lagi mencukupi. Silakan coba lagi.`);
                     }
                 }
 
@@ -117,11 +119,19 @@ export const transactionRoutes = new Elysia()
 
             return { message: 'Transaksi Berhasil', transactionCode: result.code };
 
-        } catch (e: any) {
+        } catch (error: unknown) {
+            if (error instanceof TransactionInputError) {
+                set.status = 400;
+                return {
+                    message: 'Transaksi Gagal!',
+                    detail: error.message
+                };
+            }
+
             set.status = 500;
             return {
                 message: 'Transaksi Gagal!',
-                detail: e.message || 'Terjadi kesalahan internal pada database.'
+                detail: 'Terjadi kesalahan internal pada database.'
             };
         }
     }, {
@@ -172,11 +182,11 @@ export const transactionRoutes = new Elysia()
                 data: formattedHistory
             };
 
-        } catch (e: any) {
+        } catch (error: unknown) {
             set.status = 500;
             return {
                 message: 'Gagal memuat histori!',
-                detail: e.message || 'Terjadi kesalahan internal pada database.'
+                detail: 'Terjadi kesalahan internal pada database.'
             };
         }
     });
