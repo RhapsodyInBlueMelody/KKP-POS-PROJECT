@@ -1,5 +1,5 @@
-import bcrypt from 'bcryptjs';
-import { Elysia, t } from 'elysia'; // Import 't' untuk skema validasi
+import bcrypt from 'bcrypt';
+import { Elysia, t } from 'elysia';
 import { jwt } from '@elysiajs/jwt';
 import { prisma } from '../lib/prisma';
 
@@ -9,7 +9,6 @@ export const authRoutes = new Elysia()
         secret: process.env.JWT_SECRET!,
     }))
     .post('/login', async ({ jwt, body, set }) => {
-        // Data di bawah ini dijamin 100% ada dan bertipe string karena sudah divalidasi oleh TypeBox
         const { username, password } = body;
 
         const user = await prisma.user.findUnique({
@@ -17,18 +16,17 @@ export const authRoutes = new Elysia()
         });
 
         if (!user) {
-            set.status = 404; // Berikan HTTP Status yang sesuai arsitektur REST API
-            return { message: "User not found" };
+            set.status = 401;
+            return { message: "Invalid credentials" };
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
-            set.status = 401; // 401 untuk kredensial tidak valid
+            set.status = 401;
             return { message: "Invalid credentials" };
         }
 
-        // Tembak JWT Token dengan payload terstandarisasi
         const token = await jwt.sign({
             userId: user.userId,
             role: user.role,
@@ -45,9 +43,8 @@ export const authRoutes = new Elysia()
             }
         };
     }, {
-        // --- GERBANG VALIDASI OTOMATIS (KONTRAK KODE) ---
         body: t.Object({
-            username: t.String({ error: "Username wajib diisi dan berupa teks" }),
-            password: t.String({ error: "Password wajib diisi dan berupa teks" })
+            username: t.String({ minLength: 1 }),
+            password: t.String({ minLength: 1 })
         })
     });
