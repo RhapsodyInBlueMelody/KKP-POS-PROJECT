@@ -8,6 +8,9 @@ RUN bun install
 
 COPY . .
 
+# Generate the Prisma Client inside the supported Linux container environment.
+RUN bunx prisma generate
+
 EXPOSE 3000
 
-CMD ["bun", "src/index.js"]
+CMD ["bun", "src/index.ts"]
