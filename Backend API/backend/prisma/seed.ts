@@ -12,9 +12,6 @@ const prisma = new PrismaClient({ adapter })
 async function main() {
     console.log('Memulai seeding data... 🚀')
 
-    // ==========================================
-    // 1. USERS (Admin & Kasir)
-    // ==========================================
     const hashedPassword = await bcrypt.hash('admin123', 10)
 
     const admin = await prisma.user.upsert({
@@ -41,9 +38,6 @@ async function main() {
         }
     })
 
-    // ==========================================
-    // 2. CATEGORIES
-    // ==========================================
     const makanan = await prisma.category.upsert({
         where: { code: 'CAT001' },
         update: {},
@@ -66,9 +60,6 @@ async function main() {
         }
     })
 
-    // ==========================================
-    // 3. SUPPLIERS
-    // ==========================================
     const supplier = await prisma.supplier.upsert({
         where: { code: 'SUP001' },
         update: {},
@@ -80,9 +71,6 @@ async function main() {
         }
     })
 
-    // ==========================================
-    // 4. PRODUCTS (Tambahan variasi barang)
-    // ==========================================
     const productsData = [
         { code: 'PRD001', name: 'Indomie Goreng', price: 3500, stock: 100, unit: 'PCS', catId: makanan.categoryId },
         { code: 'PRD002', name: 'Roti Coklat', price: 5000, stock: 50, unit: 'PCS', catId: makanan.categoryId },
@@ -92,7 +80,7 @@ async function main() {
         { code: 'PRD006', name: 'Air Mineral 600ml', price: 3000, stock: 120, unit: 'BOTOL', catId: minuman.categoryId },
     ]
 
-    const products: any[] = []
+    const products: Array<Awaited<ReturnType<typeof prisma.product.upsert>>> = []
     for (const p of productsData) {
         const prod = await prisma.product.upsert({
             where: { code: p.code },
@@ -112,47 +100,37 @@ async function main() {
         products.push(prod)
     }
 
-    // ==========================================
-    // 5. GENERATE DUMMY TRANSACTIONS SECARA OTOMATIS
-    // ==========================================
     console.log('Sedang membuat histori transaksi dummy yang banyak...')
 
-    // Konfigurasi tanggal mundur untuk simulasi histori chart biar estetik
     const targetDates = [
         '20260520',
         '20260521',
         '20260522',
         '20260523',
-        '20260524' // Hari ini
+        '20260524'
     ]
 
-    const paymentMethods: Prisma.PaymentMethod[] = ['CASH', 'QRIS']
-
+    const paymentMethods = ['CASH', 'QRIS'] as const
     let totalTrxCreated = 0
 
     for (const dateStr of targetDates) {
-        // Setiap harinya kita generate antara 3-5 transaksi secara random
         const transactionCount = Math.floor(Math.random() * 3) + 3
 
         for (let t = 0; t < transactionCount; t++) {
-            // Urutan kodifikasinya dirapatkan murni tanpa strip
             const randomTrxPad = Math.floor(Math.random() * 1000).toString().padStart(3, '0')
             const transactionCode = `TRX${dateStr}${randomTrxPad}`
 
-            // Pilih acak berapa item yang dibeli di transaksi ini (1 s/d 3 item berbeda)
             const itemCount = Math.floor(Math.random() * 3) + 1
             const shuffledProducts = [...products].sort(() => 0.5 - Math.random())
             const selectedProductsForTrx = shuffledProducts.slice(0, itemCount)
 
-            // Hitung kalkulasi item baris
             const trxItemsPayload = selectedProductsForTrx.map((prod, index) => {
-                const quantity = Math.floor(Math.random() * 3) + 1 // beli 1-3 pcs
+                const quantity = Math.floor(Math.random() * 3) + 1
                 const randomItemPad = Math.floor(1000 + Math.random() * 9000).toString()
 
                 return {
-                    // FORMAT BERSIH RAPAT: TRXITEM + YYYYMMDD + 3 digit index + 4 digit acak
                     code: `TRXITEM${dateStr}${index.toString().padStart(3, '0')}${randomItemPad}`,
-                    quantity: quantity,
+                    quantity,
                     priceAtTime: prod.price,
                     productId: prod.productId
                 }
@@ -164,21 +142,18 @@ async function main() {
             )
             const chosenMethod = paymentMethods[Math.floor(Math.random() * paymentMethods.length)]
 
-            // Gunakan aman upsert / create langsung dengan pengecekan kode
             const existingTrx = await prisma.transaction.findUnique({ where: { code: transactionCode } })
             if (!existingTrx) {
                 const transaction = await prisma.transaction.create({
                     data: {
                         code: transactionCode,
-                        totalPrice: totalPrice,
+                        totalPrice,
                         kasirId: kasir.userId,
                         paymentMethod: chosenMethod,
-                        // Set tanggal buatan di database sesuai hari simulasinya
                         createdAt: new Date(`${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}T10:00:00.000Z`)
                     }
                 })
 
-                // Masukkan item-item belanjanya
                 for (const item of trxItemsPayload) {
                     await prisma.transactionItem.create({
                         data: {
