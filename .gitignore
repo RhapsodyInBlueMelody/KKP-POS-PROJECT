@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.bun/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local development / secrets
+*.pem
+*.key
+*_sshid
+id_rsa
+id_ed25519
+
+# Expo / React Native
+.expo/
+dist/
+web-build/
+
+# Build outputs
+build/
+coverage/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
